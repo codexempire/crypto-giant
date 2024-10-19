@@ -14,12 +14,16 @@ import { Wallet } from 'src/schema/wallet.schema';
 
 @Injectable()
 export class TransferService {
+  connection: Connection;
+  static connection: Partial<Connection>;
   constructor(
     @InjectModel('wallet') private walletModel: Model<Wallet>,
     @InjectModel('transaction') private transactionModel: Model<Transaction>,
     @InjectModel('wallet-log') private walletLogModel: Model<WalletLog>,
-    @InjectConnection() private readonly connection: Connection,
-  ) {}
+    @InjectConnection() mongoconnection: Connection,
+  ) {
+    this.connection = mongoconnection;
+  }
 
   private createTransactionHash(
     from: string,
@@ -41,15 +45,19 @@ export class TransferService {
     balanceAfter: number,
     session: any,
   ) {
-    const log = new this.walletLogModel({
-      walletAddress,
-      operation,
-      amount,
-      balanceBefore,
-      balanceAfter,
-      timestamp: new Date(),
-    });
-    await log.save({ session });
+    await this.walletLogModel.create(
+      [
+        {
+          walletAddress,
+          operation,
+          amount,
+          balanceBefore,
+          balanceAfter,
+          timestamp: new Date(),
+        },
+      ],
+      { session },
+    );
   }
 
   async transferFunds(
@@ -59,17 +67,20 @@ export class TransferService {
     pin: string,
   ): Promise<void> {
     const session = await this.connection.startSession();
-    // const session = null;
 
     session.startTransaction();
 
     try {
-      const senderWallet: Wallet = await this.walletModel
-        .findOne({ address: senderAddress })
-        .session(session);
-      const recepientWallet: Wallet = await this.walletModel
-        .findOne({ address: recepientAddress })
-        .session(session);
+      const senderWallet: Wallet = await this.walletModel.findOne(
+        { address: senderAddress },
+        null,
+        { session },
+      );
+      const recepientWallet: Wallet = await this.walletModel.findOne(
+        { address: recepientAddress },
+        null,
+        { session },
+      );
 
       if (!senderWallet) {
         throw new NotFoundException('Sender wallet not found');
@@ -96,15 +107,18 @@ export class TransferService {
       const recepientWalletBalanceBefore = recepientWallet.balance;
 
       // Atomic debit and credit
-      await this.walletModel
-        .updateOne({ address: senderAddress }, { $inc: { balance: -amount } })
-        .session(session);
+      await this.walletModel.updateOne(
+        { address: senderAddress },
+        { $inc: { balance: -amount } },
+        { session },
+      );
 
-      await this.walletModel
-        .updateOne({ address: recepientAddress }, { $inc: { balance: amount } })
-        .session(session);
+      await this.walletModel.updateOne(
+        { address: recepientAddress },
+        { $inc: { balance: amount } },
+        { session },
+      );
 
-      // Log the changes
       await this.logWalletChange(
         senderAddress,
         'debit',
@@ -131,17 +145,19 @@ export class TransferService {
         timestamp,
       );
 
-      const transaction = new this.transactionModel({
-        from: senderAddress,
-        to: recepientAddress,
-        amount,
-        timestamp,
-        transactionHash,
-      });
+      await this.transactionModel.create(
+        [
+          {
+            from: senderAddress,
+            to: recepientAddress,
+            amount,
+            timestamp,
+            transactionHash,
+          },
+        ],
+        { session },
+      );
 
-      await transaction.save({ session });
-
-      // Commit transaction
       await session.commitTransaction();
     } catch (error) {
       await session.abortTransaction();
