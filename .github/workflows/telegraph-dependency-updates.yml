@@ -1,0 +1,46 @@
+name: Telegraph dependency updates
+
+on:
+  push:
+    branches: [staging]
+    paths: ['**/package.json', '**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock', '**/bun.lock', '**/requirements*.txt', 'requirements/**']
+  workflow_dispatch:
+
+concurrency:
+  group: telegraph-dependency-updates-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update-dependencies:
+    if: github.ref_type == 'branch' && github.event.deleted != true && !startsWith(github.ref_name, 'fix/telegraph-dependency-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install pnpm
+        run: |
+          npm install --prefix "$RUNNER_TEMP/telegraph-tools" --no-audit --no-fund pnpm@8.15.9
+          echo "$RUNNER_TEMP/telegraph-tools/node_modules/.bin" >> "$GITHUB_PATH"
+      - uses: borodedamie/telegraph-pr-agent@dd9d15ad68ed3364c1cc69566667b0001b945c53
+        with:
+          monthly-budget-usdc: ${{ vars.MONTHLY_BUDGET_USDC }}
+        env:
+          TELEGRAPH_EVM_PRIVATE_KEY: ${{ secrets.TELEGRAPH_EVM_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MODEL_CUTOFF: ${{ vars.MODEL_CUTOFF }}
+          MODEL_PROVIDER: ${{ vars.MODEL_PROVIDER }}
+          MODEL_ID: ${{ vars.MODEL_ID }}
+          MODEL_CUTOFF_SOURCE_URL: ${{ vars.MODEL_CUTOFF_SOURCE_URL }}
+          MODEL_CUTOFF_STATUS: ${{ vars.MODEL_CUTOFF_STATUS }}
+          PREFERRED_MINER_ID: ${{ vars.PREFERRED_MINER_ID || '7314' }}
